@@ -1,6 +1,7 @@
 package com.ixyf.example.serializable;
 
 import java.io.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 序列化与反序列化
