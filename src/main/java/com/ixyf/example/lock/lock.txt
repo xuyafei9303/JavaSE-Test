@@ -1,0 +1,226 @@
+Java中的锁：
+    锁的主要作用是保障线程在并发情况下数据的一致性。多线程编程中为了保障数据的一致性，通常需要在使用对象或者调用方法之前加锁，这时候如果有其他线程也需要使用该对象或者调用该方法，则首先需要
+    获得锁，如果某个线程发现锁正在被其他线程使用，就会进入阻塞队列等待锁的释放，直到其他线程执行完并释放锁，该线程才有机会再次获取锁并执行操作。
+
+    锁从乐观和悲观的角度可分为乐观锁和悲观锁，从获取资源的公平性角度可分为公平锁和非公平锁，从是否共享资源的角度可分为共享锁和独占锁，从锁的状态角度可分为偏向锁、轻量级锁、重量级锁。
+    jvm还巧妙的设计了自旋锁以更快的使用CPU资源
+
+    乐观锁：
+        每次读取数据时都会认为别人不会修改数据，所以不会加锁，但在更新的时候会判断在此期间别人有没有更新该数据，通常采用在写时先读出当前版本号然后加锁的方法。
+        具体过程：比较当前版本号与上一次的版本号，如果版本号一致，代表没有被其他人修改，则进行更新，如果版本号不一致，则重复进行读，比较，写操作
+        CAS：Java中的乐观锁大部分都是采用CAS（Compare And Swap）比较和交换操作来实现的，CAS是一种原子操作，在对数据操作之前首先会比较当前值和传入的值是否一致，如果一致就进行更新，如果不一致返回失败
+
+    悲观锁：
+        每次读取数据时都认为别人会修改数据，所以每次在读写数据时都会加锁，这样别人想读写这个数据就会阻塞，等待直到获取到锁
+        Java中的悲观锁大部分都是使用AQS（Abstract Queued Synchronized，抽象的队列同步器）架构来实现的。该架构下的锁会尝试以CAS乐观锁去获取锁，如果获取不到，则会转为悲观锁（如RetreenLock）
+
+    自旋锁：
+        如果持有锁的线程能够在很短的时间内释放锁资源，那么那些等待竞争锁的线程就不需要做内核态和用户态的切换进入阻塞、挂起状态，只需要自旋等一等，在等待持有锁的线程释放锁后即可立即获取锁，这样就避免了用户线程在用户态
+        和内核态之间的频繁切换而导致的时间消耗
+        线程在自旋的时候会占用CPU，在线程长时间自旋获取不到锁时，将会产生CPU浪费，甚至有时线程永远无法获取锁而导致CPU资源被永久占用，所以需要设定一个自旋等待时间，超出时间就退出自旋模式并释放其持有的锁
+
+        1.自旋的优缺点：
+            优点：自旋锁可以减少CPU上下文的切换，对于占用锁的时间非常短或锁竞争不激烈的代码块来说性能大幅度提升，因为自旋的CPU耗时明显少于线程阻塞、挂起、在唤醒时两次CPU上下文切换所用的时间
+            缺点：在持有锁的线程占用锁时间过长或锁的竞争过于激烈时，线程在自旋过程中会长时间获取不到锁资源，将引起CPU的浪费，系统有复杂的锁依赖的情况下不适合使用自旋锁
+        2.自旋锁的时间阈值：
+            自旋锁用于使当前线程占着CPU的资源不释放，等到下次自旋获取锁资源后立即执行相关操作。但是怎么选择自旋的执行时间呢？如果自旋执行的时间太长，则会有大量的线程处于自旋状态且占用CPU资源，造成系统资源浪费。
+            JDK1.6以后，引入了自适应自旋锁。自适应自旋锁的自旋时间不再是固定值，而是由上一次在同一个锁上的自旋时间及锁的拥有者的状态来决定的，可基本认为一个线程上下文切换的时间就是一个锁自旋的最佳时间。
+
+    synchronized：
+        用于为Java对象、方法、代码块提供线程安全的操作。属于独占式的悲观锁，同时属于可重入锁。
+        使用synchronized关键字修饰对象时，同一时刻只能有一个线程对该对象进行访问；修饰方法、代码块时，同一时刻只能有一个线程执行该方法体或代码块，其他线程只能等待当前线程执行完毕并释放锁资源后才能访问该对象或代码块
+        Java中的每个对象都有个monitor对象，加锁就是在竞争monitor对象。对代码块加锁就是通过在前后分别加上monitorEnter和monitorExit指令，对方是否加锁是通过一个标记位来判断的。
+        作用范围：
+            1.作用于成员变量和非静态方法时，锁住的是对象的实例，即this对象
+            2.作用于静态方法，锁住的事class实例，因为静态方法属于class而不属于对象
+            3.作用于一个代码块时，锁住的是所有代码块中配置的对象
+        实现原理：
+            synchronized内部包括ContentionList、EntryList、WaitSet、OnDeck、Owner、!Owner六大区域
+            1.ContentionList：锁竞争队列，所有请求锁的线程都会被放在竞争队列中
+            2.EntryList：竞争候选队列，在ContentionList中有资格成为候选者来竞争锁资源的线程被移动到了EntryList
+            3.WaitSet：等待集合，调用wait方法后被阻塞的线程将被放在WaitSet中
+            4.OnDeck：竞争候选者，在同一时刻最多只有一个线程在竞争锁资源，该线程的状态被称为OnDeck
+            5.Owner：竞争到锁资源的线程被称为Owner状态线程
+            6.!Owner：在Owner线程释放锁后，会从Owner的状态变成!Owner
+        synchronized在收到新的锁请求时首先自旋，如果通过自旋也没有获取锁资源，则将被放入锁竞争队列ContentionList中。为了防止锁竞争时ContentionList尾部的元素被大量的并发线程进行CAS访问而影响性能，Owner线程会在释放锁资源时将ContentionList中
+        的部分线程移动到EntryList中，并指定EntryList中的某个线程（一般是最先进入的线程）为OnDeck线程。Owner线程并没有直接把锁传递给OnDeck线程，而是把锁竞争的权利交给OnDeck，让OnDeck重新竞争锁，也叫竞争切换，牺牲了公平性，提高了性能。
+        获取到锁资源的OnDeck线程会变成Owner线程，而未获取到锁资源的线程仍然停留在EntryList。
+        Owner线程再被wait方法阻塞后，会被转移到WaitSet队列，直到某个时刻被notify或者notifyAll唤醒，会再次进入EntryList。
+        ContentionList、EntryList、WaitSet中的线程均为阻塞状态，该阻塞是由操作系统来完成的。
+        Owner线程在执行完毕后会释放锁的资源并变成!Owner状态
+        为什么synchronized是非公平锁？
+            在synchronized中，在线程进入ContentionList之前，等待的线程会先尝试以自旋的方式获取锁，如果获取不到就进入ContentionList，该做法对于已经进入队列的线程是不公平的，因此是非公平锁。
+        JDK1.6对synchronized进行了优化，引入了适应自旋、锁消除、锁粗化、轻量级锁以及偏向锁等提高锁的效率。锁从轻量级到重量级的升级过程叫锁膨胀
+
+    ReentrantLock：
+        继承了Lock接口并实现了接口中定义的方法，是一个可重入的独占锁。通过自定义AQS（Abstract Queued Synchronized）来实现锁的获取和释放
+        独占锁：同一时刻只能被一个线程获取，而获取锁的其他线程只能在同步队列中等待；可重入锁指该锁能够支持一个线程对同一个资源执行多次加锁操作
+        支持公平锁和非公平锁。
+
+    ReentrantLock和synchronized的比较：
+        共同点：
+        1.都用于控制多线程对共享对象的访问
+        2.都是可重入锁
+        3.都保证了可见性和互斥性
+        不同点：
+        1.ReentrantLock显式获取和释放锁；synchronized隐式获取和释放锁。使用ReentrantLock时必须在finally语句块中执行释放锁操作
+        2.ReentrantLock可响应中断，可轮回，为处理锁提供了更多的灵活性
+        3.ReentrantLock是API级别的，synchronized是JVM级别的
+        4.ReentrantLock可定义公平锁
+        5.ReentrantLock通过Condition可以绑定多个条件
+        6.二者的底层实现不一样，synchronized是同步阻塞，采用悲观并发策略；Lock是同步非阻塞，采用乐观并发策略
+        7.Lock是一个接口，而synchronized是Java的关键字，synchronized是由内置的语言实现的
+        8.通过Lock可以知道是否成功获取到锁（isLock方法），通过synchronized无法做到
+        9.Lock可以通过分别定义读写锁提高多个线程读操作的效率
+
+    semaphore：
+        基于计数的信号量，在定义信号量对象时可以设定一个阈值，基于该阈值，多个线程竞争获取许可信号，线程竞争到许可信号后开始执行具体的业务逻辑，业务逻辑完成后释放该许可信号。当许可信
+        号的竞争队列超过阈值后，新加入的申请许可信号的线程将被阻塞，直到有其他许可信号被释放。
+        semaphore常用于多个线程需要共享有限资源的场景
+    countDownLatch：
+        位于java.util.concurrent包下，是个同步工具类，允许一个或多个线程一起等待其他线程的操作执行完后再执行相关操作
+        countDownLatch基于线程计数器来实现并发访问控制，主要用于主线程等待其他子线程都执行完毕后执行相关操作。
+        使用过程：
+            在主线程定义countDownLatch，并将线程计数器的初始值设置为子线程的个数，多个子线程并发执行，每个子线程在执行完毕后都会调用countDown函数将计数器-1，直到线程计数器=0，表示所有
+            的子线程任务都执行完毕，此时在countDownLatch上等待的主线程将被唤醒并继续执行
+    cyclicBarrier：
+        CyclicBarrier（循环屏障）是一个同步工具，可以让一组线程等待至某个状态后在全部一起执行。并且CyclicBarrier是可以被重用的，运行状态叫Barrier，在调用await后，线程处于Barrier状态
+        await有两个实现：
+            1.挂起当前线程直到所有的此案从都为Barrier状态在同步执行后继的任务
+            2.设置一个超时时间，在超时时间超过后，如果还有线程未达到Barrier状态，则不再等待，让达到Barrier状态的线程继续执行后续任务
+        CyclicBarrier为什么可重用？
+            CyclicBarrier维护了几个变量，包括parties，count，前者用来表示到达barrier状态的线程个数，count是内部的计数器，两个的初始值第一样的，随着await方法的调用count都会-1，直到为0的时候就将所有线程唤醒，
+            可重用的关键点就是会发生一次重置，当全部为0并执行后续操作的时候，会把count再次置为和parties一样的值，这样就达到了可重用的目的。
+    三者的区别如下：
+        countDownLatch和cyclicBarrier都用于实现多线程之间的相互等待，但二者的关注点不同。countDownLatch主要用于主线程等待其他子线程任务均执行完毕后再执行接下来的业务逻辑单元，
+        而CyclicBarrier主要用于一组线程互相等待大家都执行达到某个状态后，在同时执行接下来的业务逻辑单元。此外，countDownLatch是不可重用的，而CyclicBarrier是可重用的
+        semaphore和Java的锁功能相似，主要用于控制资源的并发访问。
+
+多线程中共享数据的方法：
+    1.将数据抽象成一个类，并将对这个数据额操作封装在类的方法中
+    public class MyData() {
+        int j = 0;
+        // 将数据抽象成myData类，并将对数据的操作作为类的方法.synchronized用作数据的同步
+        public synchronized void add(){j++}
+        public synchronized void dec(){j--}
+        public int getData(){return j;}
+    }
+
+    public class AddRunnable implements Runnable {
+        MyData myData;
+        // 线程使用该类的对象并调用类的方法对数据进行操作
+        public AddRunnable(MyData myData) {
+            this.myData = myData;
+        }
+        public void run() {
+            myData.run();
+        }
+    }
+    public class DecRunnable implements Runnable {
+        MyData myData;
+        // 线程使用该类的对象并调用类的方法对数据进行操作
+        public AddRunnable(MyData myData) {
+            this.myData = myData;
+        }
+        public void dec() {
+            myData.dec();
+        }
+    }
+    public static void main(String [] args) {
+        MyData data = new MyData();
+        Runnable add = new AddRunnable();
+        Runnable dec = new DecRunnable();
+        for(int i = 0; i < 2; i++) {
+            new Thread(add).start();
+            new Thread(dec).start();
+        }
+    }
+
+    # 上面代码首先定义了一个MyData类，并定义了针对j的数据操作。注意一定要使用synchronized，保证并发下访问对象j进行加锁操作。
+      然后定义了DecRunnable和AddRunnable，并把myData通过构造函数传入，线程内部的run函数在执行数据操作的时候直接调用MyData的方法进行操作数据，这样就实现了线程内数据操作的安全性
+      注意：如果两个线程DecRunnable和AddRunnable需要保证数据操作的原子性和一致性，就必须保证在传参的时候使用同一个data对象入参，这样无论启动多少个线程执行对data的操作，都能保证数据一致性
+
+    2.将Runnable对象作为一个类的内部类，将共享数据作为这个类的成员变量，每个线程对共享数据的操作都被封装在该类的外部类中，以便实现对数据的各种操作的同步和互斥，作为内部类的各个Runnable对象调用外部类的这些方法
+        public class MyData() {
+            int j = 0;
+            // 将数据抽象成myData类，并将对数据的操作作为类的方法.synchronized用作数据的同步
+            public synchronized void add(){j++}
+            public synchronized void dec(){j--}
+            public int getData(){return j;}
+        }
+
+        public class TestThread {
+            public static void main(String [] args) {
+                final MyData data = new MyData();
+                for(int i = 0; i < 2; i++) {
+                    new Thread(new Runnable) {
+                        public void run() {
+                            data.add();
+                        }
+                    }.start();
+                    new Thread(new Runnable) {
+                        public void run() {
+                            data.dec();
+                        }
+                    }.start();
+                }
+            }
+        }
+
+    volatile:
+        保证变量的同步，还使用了稍弱的同步机制，即volatile。也用于确保将变量的的更新操作通知到其他线程。
+        两种特性：
+            1.保证该变量对所有线程课件，在一个线程修改了变量的值后，新的值对于其他线程是可以立即获取的。
+            2.禁止指令重排。即volatile变量不会被缓存到寄存器中或者对其他处理器不可见的地方，因此在读取volatile类型的变量的时候总能读取到最新写入的值
+        访问volatile变量的时候不会执行加锁操作，也就不会执行线程阻塞，因此volatile变量是一种比synchronized更轻量级的同步机制。
+        适用于被多个线程共享，多个线程均可针对这个变量执行赋值或者读取的操作
+        原理：在有多个线程对普通变量进行读写的时候， 每个线程都首先需要将数据从内存中复制到CPU缓存中，如果计算机有多个CPU，则线程可能都在不同的CPU中被处理，这意味
+            着每个线程都需要将同一个数据复制到不同的CPU cache中，这样在每个线程都针对同一个变量的数据做了不同的处理后，就可能存在数据不一致的情况。如果将变量声明为volatile
+            ，jvm就能保住每次读取变量的时候都直接从内存读取，跳过CPU cache这步，有效解决了多线程数据同步的问题。
+        这里涉及到JMM内存模型和MESI缓存一致性协议、内存屏障，也就是volatile的底层实现
+        JMM：
+            JMM定义了线程和主内存之间的抽象关系，线程之间的共享变量存储在主内存（Main Memory）中，每个线程都有一个私有的本地内存（Local Memory），本地内存中存储了该线程以读/写共享变量的副本
+            ，本地内存是一个抽象概念，并不真实存在。
+            Java中jvm对内存模型的具体实现：线程栈区和堆区
+            * 每个线程都拥有自己的线程栈，线程栈包含了当前线程执行的方法调用相关信息，我们也把它称作调用栈。随着代码的不断执行，调用栈会不断变化，所有原始类型的局部变量都保存在了线程栈的局部变量表中
+            * 各个线程之间的线程栈都是独立的，无法共享，但是可以通过传递变量的副本来进行传送
+            * Java堆区包含了Java创建的所有对象信息，比如引用类型，他的引用指针还是在栈区，但是真实的内存开辟是在堆区的，所有对象也存在于堆区
+
+            内存模型带来的问题就是可见性
+            CPU中运行的线程从主存中拷贝共享对象obj到它的CPU缓存，比如变量i，对其进行修改，因为缓存的原因，没有立即刷新值到其他的线程本地内存中，导致其他线程读取的时候发生数据不一致的问题
+            volatile加上MESI缓存一致性协议，解决了这个问题。
+            M(Modified)         这行数据有效，数据被修改了，和内存中的数据不一致，数据只存在于本Cache中
+            E(Exclusive)        这行数据有效，数据和内存中的数据一致，数据只存在于本Cache中
+            S(Shared)           这行数据有效，数据和内存中的数据一致，数据存在于很多Cache中
+            I(Invalid)          这行数据无效
+
+            volatile并不能取代synchronized，他可以保证变量的单次读，写操作的原子性，但并不能保证像i++这种本质上属于读、写的操作
+
+    ConcurrentHashmap：
+        和HashMao实现类似，不同的是他采用了分段锁的思想支持并发操作，分段锁的好处是可以减小锁的粒度，ConcurrentHashmap是线程安全的map，最重要的get和set方法都是加了锁的，如果对整个map进行加锁，
+        确实可以得到线程安全的对象，但是锁的粒度太大了，意味着同一时刻只能有一个线程操作这个map，所有ConcurrentHashmap内部使用了多个segment，操作数据的时候会给每个segment都加锁，这样就减小了粒度
+
+        实现：
+            内部细分为多个HashMap，叫做数据段（segment）。默认分为16个数据段，对每个数据段都是单独加锁，数据段的个数就是锁的并发度。
+            ConcurrentHashmap由segment和HashEntry数组组成。segment继承了可重入锁（ReentrantLock），在内部扮演了锁的角色，HashEntry用于存储数据
+            segment是数组HashEntry+链表的结构。HashEntry是链表的结构，每个segment守护一个HashEntry数组里面的元素，如果要对数组的元素进行操作，首先要获取数组对应的segment锁
+
+Java中的线程调度：
+    1.抢占式调度：每个线程都以抢占的方式获取CPU资源并快速执行，执行完毕后立即释放CPU资源，具体哪些线程能抢占到CPU资源由操作系统决定，这种模式下，每个线程对CPU资源的申请地位都相等
+        抢占式调度的实现：为每个线程按照优先级高低分配不同的CPU时间片，优先级高的线程先执行。优先级低的线程只是获取CPU时间片的优先级被降低，不会分配不到时间片
+        线程让出CPU的情况如下：
+            1.当前运行的线程主动放弃CPU，例如运行中的线程调用yield放弃CPU的使用权
+            2.当前运行的线程进入阻塞状态，例如调用文件读取IO操作，锁等待，socket等待
+            3.当前线程运行结束，即运行完run方法里面的任务
+    2.协同式调度：某个线程在执行完后主动通知操作系统将CPU资源切换到另一个线程上执行，线程对CPU的持有时间由线程自身控制，线程切换更加透明，更适合多个线程上交替执行某些任务的情况
+        协同式调度的缺点：如果其中一个线程因为外部原因（磁盘IO阻塞、网络IO阻塞等）运行阻塞，那么可能导致整个系统阻塞甚至崩溃
+
+
+
+
+
+
+
+
+
+
